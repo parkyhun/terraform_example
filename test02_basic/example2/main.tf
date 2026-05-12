@@ -132,13 +132,15 @@ data "aws_ami" "latest_al2023"{
 
 # ec2 만들기
 resource "aws_instance" "my_ec2" {
+    # ec2 인스턴스 3개 만들기
+    count                        = 3
     ami                          = data.aws_ami.latest_al2023.id    # 검색된 최신의 os 이미지 id
     instance_type                = "t3.micro"                       # 서버사양
     subnet_id                    = aws_subnet.public_subnet.id      # 위에서 미리 준비한 public subnet 의 id
     vpc_security_group_ids       = [aws_security_group.ssh_sg.id]      # 보안그룹 (여러개 등록가능)
     key_name                     = aws_key_pair.kp.key_name         # 위에서 미리 준비한 key pair 의 이름
     tags = {
-        Name = "my-ce2"
+        Name = "my-ce2-${count.index + 1}"
     }
   
 }
@@ -146,7 +148,8 @@ resource "aws_instance" "my_ec2" {
 # 생성된 ec2 의 public ip를 출력
 output "instance_public_ip" {
     description = "만들어진 ec2 의 public ipv4 주소"
-    value = aws_instance.my_ec2.public_ip                      # .public_ip 하면 참조가 가능하다
+    # * 연산자를 이용해서 만든 public ip를 배열에 담아오기 
+    value = aws_instance.my_ec2[*].public_ip                      # .public_ip 하면 참조가 가능하다
 
 }
 # public ip 를 이용해서 inventory.yml 파일 만들기
@@ -156,7 +159,10 @@ resource "local_file" "ansible_inventory" {
     content = yamlencode({
         all = {
             hosts = {
-                "${aws_instance.my_ec2.public_ip}" = {
+                # 반복문을 이용해서 모든 hosts(3개) 의 정보를 추가한다
+                for instance in aws_instance.my_ec2 : 
+                # string type key = map type value
+                instance.public_ip => {
                     ansible_user = "ec2-user"
                     ansible_ssh_private_key_file = "${path.module}/lecture-key.pem"
                 }
@@ -184,12 +190,12 @@ resource "terraform_data" "wait_for_instance"{
 
     # ec2 인스턴스의 id 가 변경된다면 다시 실행하도록 방아쇠를 설치한다
     # 즉 ec2 가 새롭게 만들어지면 이블럭이 다시 실행되고 결과적으로 sleep 30 이 다시 실행된다.
-    triggers_replace = aws_instance.my_ec2.id
+    triggers_replace = aws_instance.my_ec2[*].id
 
 
     # local computer (rockey linux) 에서 실행할 명령
     provisioner "local-exec" {
-        command = "sleep 30"
+        command = "sleep 60"
     }
 }
 
@@ -200,8 +206,8 @@ resource "terraform_data" "ansible_run"{
     depends_on = [ terraform_data.wait_for_instance ]
 
     # ec2가 새로 만들어지면 ansible platbook 을 실행하도록 여기도 추가 (트리거를 걸어둔다 라고 한다)
-    triggers_replace = aws_instance.my_ec2.id
-    # 아래 작업이 성공한 기억이 있으면 실행되지 않는다
+    triggers_replace = aws_instance.my_ec2[*].id
+ 
     provisioner "local-exec" {
       command = "ansible-playbook site.yml"
     }

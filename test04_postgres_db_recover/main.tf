@@ -1,3 +1,4 @@
+# main.tf
 
 
 # version 명시하기
@@ -12,13 +13,14 @@ terraform {
 }
 
 
-
 # 1. provider 설정
 provider "aws" {
     region = "ap-northeast-2" # 서울 리전
 }
 
+
 # 2. vpc 및 네트워크 생성 (인프라의 기초 공사)
+
 
 # vpc
 resource "aws_vpc" "main" {
@@ -35,6 +37,7 @@ resource "aws_internet_gateway" "igw" {
     tags    = { Name = "lecture-igw"}
 }
 
+
 # 현재 리전에서 사용가능한(avaliable) 가용 영역 데이터 가져오기
 data "aws_availability_zones" "available"{
     state = "available"
@@ -45,15 +48,20 @@ data "aws_availability_zones" "available"{
 resource "aws_subnet" "public_subnet" {
     vpc_id                  = aws_vpc.main.id
     cidr_block              = "10.0.1.0/24" # 256 개의 ip 를 이방에 할당
-    # data.aws_availability_zones.available.name 는 배열인데 거기에는 여러개의 가용영역 데이터가 들어있다
-    # 그중에서 0 번 방에 있는 데이터를 연결한다 서브넷 에 있는 가용영역 서울이나 일본 같은 영역 설정
+   
+    # data.aws_availability_zones.available.names 는 배열인데 거기에는 여러개의 가용영역 데이터가 들어있다.
+    # 그중에서 0 번 방에 있는 데이터를 연결한다
     availability_zone = data.aws_availability_zones.available.names[0]
+
 
     map_public_ip_on_launch = true # 이방에 생기는 서버는 무조건 공인 ip 를 받는다.
     tags = {
         Name = "lecture-subnet"
     }
 }
+
+
+
 
 # 라우팅 테이블 : 트레픽 이정표
 resource "aws_route_table" "public_rt" {
@@ -66,38 +74,47 @@ resource "aws_route_table" "public_rt" {
     }
 }
 
-# public subnet 을 위의 라우팅 테이블로 연결 
-resource "aws_route_table_association" "a" {
-    subnet_id           = aws_subnet.public_subnet.id         # 우리가 만든 퍼블릭 서브넷은
-    route_table_id      = aws_route_table.public_rt.id    #위에서 만든 라우팅 테이블로 연결 
+
+# public subnet 을 위의 라우팅 테이블로 연결
+resource  "aws_route_table_association" "a" {
+    subnet_id       = aws_subnet.public_subnet.id # 우리가 만든 퍼블릭 서브넷은
+    route_table_id  = aws_route_table.public_rt.id # 위에서 만든 라우팅 테이블로 연결
 }
 
+
 # pem 파일 관련 작업
+
+
 # 알고리즘 결정
 resource "tls_private_key" "pk" {
-    algorithm   = "RSA"
-    rsa_bits    = 4096
+    algorithm = "RSA"
+    rsa_bits  = 4096
 }
 # 키등록
 resource "aws_key_pair" "kp" {
-    key_name        = "lecture-key"
-    public_key      = tls_private_key.pk.public_key_openssh
+    key_name   = "lecture-key"
+    public_key = tls_private_key.pk.public_key_openssh
 }
 
-# 개인키 가져오기
-# "local_file" resource 를 이용하면 파일을 생성할수 있다
+
+# 개인키를 가져오기
+# "local_file" resource 를 이용하면 파일을 생성할수 있다.
 resource "local_file" "ssh_key" {
-    filename            = "${path.module}/lecture-key.pem"          # ${path.module}은 현재 실행경로를 의미한다, 실행시 현재 경로에 키를 생성한다
-    content             = tls_private_key.pk.private_key_pem
-    file_permission     = "0600"                                     # 파일 권한 설정 
+    # ${path.module} 은 현재 실행경로를 의미한다.
+    filename        = "${path.module}/lecture-key.pem"
+    content         = tls_private_key.pk.private_key_pem
+    file_permission = "0600" # 파일의 권한 설정
 }
 
+
+# 보안그룹
 resource "aws_security_group" "ssh_sg" {
     # 보안 그룹의 이름은 겹치지 않게 유일하게 식별되는 이름을 지어야 한다.
     name = "allow-ssh"
     vpc_id = aws_vpc.main.id
 
-    # 밖에서 안으로 들어오는 규칙  ingress 
+
+    # 밖에서 안으로 들어오는 규칙  ingress
     ingress {
         from_port   = 22            # 시작 port
         to_port     = 22            # 끝 port
@@ -106,52 +123,59 @@ resource "aws_security_group" "ssh_sg" {
     }
     # 밖에서 안으로 들어오는 규칙  ingress nginx
     ingress {
-        from_port   = 80            # 시작 port
-        to_port     = 80           # 끝 port
+        from_port   = 5432            # 시작 port
+        to_port     = 5432          # 끝 port
         protocol    = "tcp"         # protocol
         cidr_blocks = ["0.0.0.0/0"] # 외부에서 들어오는 모든 traffic (실무에서는 나의 ip 만)
     }
+
+
     # 안에서 밖으로 나가는 규칙  egress
     egress {
-        from_port   = 0             # 0번부터 
+        from_port   = 0             # 0번부터
         to_port     = 0             # 0번까지 (모든 포트)
-        protocol    = "-1"          # 모든 프로토콜 
+        protocol    = "-1"          # 모든 프로토콜
         cidr_blocks = ["0.0.0.0/0"]
     }
 }
 
-# ec2 에 설치할 amzon linux 최신 이미지 검색
-data "aws_ami" "latest_al2023"{
-    most_recent = true
-    owners = ["amazon"]
+
+# ec2 에 설치할 amazon linux 최신 이미지 검색
+data "aws_ami" "latest_al2023" {
+    most_recent   = true
+    owners        = ["amazon"]
     filter {
-      name = "name"
-      values = ["al2023-ami-*-x86_64"] # 이름이 이렇게 시작하는 것들 중에서 최신 이미지 검색
+        name    = "name"
+        values  = ["al2023-ami-*-x86_64"]  # 이름이 이렇게 시작하는 것들 중에서 최신 이미지 검색
     }
 }
+
 
 # ec2 만들기
 resource "aws_instance" "my_ec2" {
-    ami                          = data.aws_ami.latest_al2023.id    # 검색된 최신의 os 이미지 id
-    instance_type                = "t3.micro"                       # 서버사양
-    subnet_id                    = aws_subnet.public_subnet.id      # 위에서 미리 준비한 public subnet 의 id
-    vpc_security_group_ids       = [aws_security_group.ssh_sg.id]      # 보안그룹 (여러개 등록가능)
-    key_name                     = aws_key_pair.kp.key_name         # 위에서 미리 준비한 key pair 의 이름
+    ami                     = data.aws_ami.latest_al2023.id     # 검색된 최신의 os 이미지 id
+    instance_type           = "t3.micro"                        # 서버사양
+    subnet_id               = aws_subnet.public_subnet.id       # 위에서 미리 준비한 public subnet 의 id
+    vpc_security_group_ids  = [aws_security_group.ssh_sg.id]       # 보안그룹 (여러개 등록할수 있다)
+    key_name                = aws_key_pair.kp.key_name          # 위에서 미리 준비한 key pair 의 이름
     tags = {
-        Name = "my-ce2"
+        Name = "my-ec2"
     }
-  
 }
 
-# 생성된 ec2 의 public ip를 출력
-output "instance_public_ip" {
+
+# 생성된 ec2 의 public  ip 를 출력
+output "instance_public_ip"{
     description = "만들어진 ec2 의 public ipv4 주소"
-    value = aws_instance.my_ec2.public_ip                      # .public_ip 하면 참조가 가능하다
-
+    # .public_ip  하면 참조가 가능하다
+    value = aws_instance.my_ec2.public_ip
 }
-# public ip 를 이용해서 inventory.yml 파일 만들기
-resource "local_file" "ansible_inventory" {
-    filename = "${path.module}/inventory.yml"       # 파일 경로와 파일명
+
+
+#  public ip 를 이용해서 inventory.yml 파일 만들기
+resource "local_file" "ansible_inventory"{
+    # 파일의 경로와 파일명
+    filename = "${path.module}/inventory.yml"
     # 파일의 내용을 map 객체를 이용해서 구성하기
     content = yamlencode({
         all = {
@@ -162,19 +186,21 @@ resource "local_file" "ansible_inventory" {
                 }
             }
         }
-    })                        
+    })
 }
 
-# ansible.cfh 파일생성
-resource "local_file" "ansible_config" {
+
+# ansible.cfg 파일 생성
+resource "local_file" "ansible_config"{
     filename = "${path.module}/ansible.cfg"
-    # inventory 파일의 경로와 ssh 보안 확인 (host key checking) 을 자동으로 설정 
+    # inventory 파일의 경로와  ssh 보안 확인(Host key Checking) 을 자동으로 설정
     content = <<-EOF
         [defaults]
         inventory = ./inventory.yml
         host_key_checking = False
     EOF
 }
+
 
 # 1. 인프라 생성후 ansible play book 을 실행 가능한 시간 만큼 대기한다.
 resource "terraform_data" "wait_for_instance"{
@@ -198,11 +224,18 @@ resource "terraform_data" "wait_for_instance"{
 resource "terraform_data" "ansible_run"{
     # 실행순서 보장
     depends_on = [ terraform_data.wait_for_instance ]
-
-    # ec2가 새로 만들어지면 ansible platbook 을 실행하도록 여기도 추가 (트리거를 걸어둔다 라고 한다)
-    triggers_replace = aws_instance.my_ec2.id
-    # 아래 작업이 성공한 기억이 있으면 실행되지 않는다
+   
+    # ec2 가 새로 만들어지면 ansible playbook 을 실행하도록 여기도 방아쇠를 걸어 놓는다.
+    triggers_replace = {
+        instance_id = aws_instance.my_ec2.id
+        always_run = "${timestamp()}" # 실행할때 마다 시간이 달라지므로 무조건 플레이북이 실행된다.
+    }
+   
+    # 아래의 작업이 성공한 기억이 있으면 다시 또 실행되지 않는다.
     provisioner "local-exec" {
-      command = "ansible-playbook site.yml"
+        # DB 설치하고 파일 copy 하고 권한변경이 잦고 하면 에러가 날수 있기때문에 안정적으로 실행하기 위해
+        # ANSIBLE_SSH_PIPELINING=1 라는 임시 환경 변수를 추가한다.
+        # 해당 환경변수는 ansible playbook 이 실행될때에 한해서 ansible 이 사용하는 일시적인 환경변수이다
+        command = "ANSIBLE_SSH_PIPELINING=1 ansible-playbook site.yml"
     }
 }

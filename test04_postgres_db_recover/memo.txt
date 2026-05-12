@@ -1,0 +1,33 @@
+
+- DB 서버에 접속해서 복구할 파일 만들기 (testvm1)
+
+# /tmp 폴더로 이동
+cd  /tmp
+
+# pg_dumpall 을 실행하기 위해 postgres 계정으로 변신해서  백업파일 생성
+# 지금은 실습을 위해 수동으로 하지만 실제로는 일정주기로 자동으로 하게 해야 한다.
+sudo  -u  postgres  pg_dumpall  -f  /tmp/full_db_backup.sql
+
+
+
+
+# mgmt 서버에서 testvm1 에 있는 /tmp/full_db_backup.sql 파일을 현재 경로로 가져오기
+
+scp  root@172.16.8.101:/tmp/full_db_backup.sql   .
+
+
+
+
+# 버킷이름
+db-backup-storage-239bb841
+
+# full_db_backup.sql 파일을 s3 버킷에 동일한 파일명으로 업로드하기
+aws s3 cp ./full_db_backup.sql s3://db-backup-storage-239bb841/full_db_backup.sql
+
+# 목록 확인하기
+aws s3 ls s3://db-backup-storage-239bb841
+
+# 삭제 방법
+aws s3 rm s3://db-backup-storage-239bb841/ --recursive
+
+# 모두 삭제후에 terraform destroy 하면 s3 bucket도 같이 삭제 된다

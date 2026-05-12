@@ -1,0 +1,2 @@
+# 버킷이름
+db-backup-storage-239bb841
